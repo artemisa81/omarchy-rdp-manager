@@ -1019,6 +1019,11 @@ Panel {
     readonly property bool testing: !!root.svc && root.svc.testingId === row.conn.id
     readonly property bool showTestResult: !!root.svc && root.svc.testResultId === row.conn.id
       && root.svc.testResult !== ""
+    // A managed machine's own state, shown instead of the session label when no
+    // session is attached, so the light and the text agree.
+    readonly property var machine: (!!row.conn.status && root.svc)
+      ? Model.machineState(root.svc.vmKnown(row.conn.id), root.svc.vmIsRunning(row.conn.id))
+      : null
 
     hasCursor: root.cursorActive && root.selectedIndex === row.rowIndex
     foreground: root.foreground
@@ -1089,12 +1094,14 @@ Panel {
           width: parent.width
           text: row.testing
             ? "Testing…"
-            : (row.showTestResult ? root.svc.testResult : row.status.label)
+            : (row.showTestResult
+                ? root.svc.testResult
+                : ((!row.live && row.machine) ? row.machine.label : row.status.label))
           color: row.testing
             ? root.accent
             : (row.showTestResult
                 ? (root.svc.testOk ? root.foreground : root.urgent)
-                : root.toneColor(row.status.tone))
+                : root.toneColor((!row.live && row.machine) ? row.machine.tone : row.status.tone))
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight

@@ -855,6 +855,17 @@ function rowStatus(session, nowSeconds) {
   return { label: "Not connected", tone: "dim" }
 }
 
+// The running state of a managed machine, for the row's third line when no
+// session is attached. Kept separate from rowStatus() so a green indicator never
+// sits next to a "Not connected" label — the light and the text describe the
+// same thing whenever the machine has a `status` command.
+function machineState(vmKnown, vmRunning) {
+  if (!vmKnown) return { label: "Checking…", tone: "dim" }
+  return vmRunning
+    ? { label: "Running", tone: "active" }
+    : { label: "Stopped", tone: "urgent" }
+}
+
 function tooltipFor(connections, sessions, nowSeconds) {
   var conns = asList(connections)
   var map = sessionMap(sessions)
@@ -955,7 +966,7 @@ if (typeof module !== "undefined") module.exports = {
   describeExit, describeEnd, isFailureExit, isSessionEndCode, isDroppedSession,
   EXIT_MESSAGES, NORMAL_END_CODES,
   normalizeSession, parseStatus, parseVmStatus, sessionMap, isLive, summarize, pollInterval,
-  formatDuration, endpointFor, formatHostPort, driveSummary, rowStatus, tooltipFor, heroMeta,
+  formatDuration, endpointFor, formatHostPort, driveSummary, rowStatus, machineState, tooltipFor, heroMeta,
   upsertConnection, removeConnection, findConnection, blankConnection,
   autoResolution, parseResolution, normalizeResolution, normalizeDisplayMode, resolveResolution,
   DEFAULT_PORT, DEFAULT_GATEWAY_PORT, CERT_POLICIES, DISPLAY_MODES, COMMON_RESOLUTIONS, SCALE_VALUES,

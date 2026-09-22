@@ -5,6 +5,15 @@
      conflict over this file. The release commit renames this heading to the
      version and bumps manifest.json, so the number is chosen from what
      actually shipped rather than guessed when the branch was opened. -->
+## 0.8.1
+
+### Changed
+
+- A managed machine's row now reads "Running"/"Stopped" (from its `status`
+  command) when no session is attached, instead of "Not connected". The
+  green/red light and the row text now describe the same thing, so a green
+  light never sits next to a "Not connected" label.
+
 ## 0.8.0
 
 ### Added

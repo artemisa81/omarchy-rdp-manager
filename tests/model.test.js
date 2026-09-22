@@ -372,6 +372,12 @@ test("parseVmStatus maps ids to booleans and never throws", function () {
   assert.deepStrictEqual(M.parseVmStatus('{"vms":{"a":1}}'), { a: false })
 })
 
+test("machineState reports a managed machine's running state", function () {
+  assert.deepStrictEqual(M.machineState(false, false), { label: "Checking…", tone: "dim" })
+  assert.deepStrictEqual(M.machineState(true, true), { label: "Running", tone: "active" })
+  assert.deepStrictEqual(M.machineState(true, false), { label: "Stopped", tone: "urgent" })
+})
+
 // ------------------------------------------------------------- config parsing
 
 test("parseConfig reports bad JSON instead of throwing", function () {
