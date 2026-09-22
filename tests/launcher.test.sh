@@ -145,7 +145,11 @@ cat > "$TMP/connections.json" <<'JSON'
       "drives": [], "options": { "microphone": "yes" } },
     { "id": "sound-junk", "name": "Sound junk", "host": "10.0.0.27", "port": 3389,
       "user": "u", "domain": "",
-      "drives": [], "options": { "sound": "no" } }
+      "drives": [], "options": { "sound": "no" } },
+    { "id": "start-cmd", "name": "Start command", "host": "10.0.0.28", "port": 3389,
+      "user": "u", "domain": "",
+      "start": "docker compose -f /x up -d",
+      "drives": [], "options": {} }
   ]
 }
 JSON
@@ -188,6 +192,17 @@ if grep -qx -- '+dynamic-resolution' <<<"$args"; then bad "dynamicResolution:fal
 count=$(grep -c '^/p:' <<<"$args")
 if [[ "$count" == "1" ]]; then ok; else bad "expected exactly one /p: line, got $count"; fi
 if grep -qx -- '/p:<redacted>' <<<"$args"; then ok; else bad "the dry run must redact the password"; fi
+
+# The launcher pins the NLA package list to NTLM, matching Model.js: on this
+# machine the stock krb5.conf otherwise sends FreeRDP into a Kerberos retry
+# loop in its NLA stage instead of falling back to NTLM.
+if grep -qx -- '/auth-pkg-list:none,ntlm' <<<"$args"; then ok; else bad "launcher must pin /auth-pkg-list to NTLM"; fi
+
+# An optional start command is surfaced in the dry-run footer, after the blank
+# line, so it never joins the argument parity comparison above.
+raw=$(bin/omarchy-rdp-launch start-cmd --dry-run)
+if grep -qx -- '# start: docker compose -f /x up -d' <<<"$raw"; then ok; else bad "dry run must show the start command"; fi
+if grep -q '^docker compose' <<<"$(launcher_args start-cmd)"; then bad "the start command must not be a FreeRDP argument"; else ok; fi
 
 # wm-class drives status detection; a missing one silently breaks the icon.
 for id in baseline negatives multidrive noname fixed-auto scaled-explicit dynamic-explicit bad-resolution unicode-resolution hidpi bad-scale gateway gateway-port gateway-invalid gateway-bad-port gateway-evil-port gateway-colon-host gateway-bool-port gateway-exp-port gateway-scalar no-sound mic mic-junk sound-junk; do

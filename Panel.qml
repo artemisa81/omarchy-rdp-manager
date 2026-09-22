@@ -89,6 +89,8 @@ Panel {
   property string formGateway: ""
   property string formUser: ""
   property string formPassword: ""
+  // Optional shell command run before connecting, e.g. to start a local VM.
+  property string formStart: ""
   property string formCert: "tofu"
   // One of Model.SCALE_VALUES — the only three FreeRDP's /scale: accepts.
   property string formScale: "100"
@@ -233,6 +235,7 @@ Panel {
       root.formGateway = conn.gateway
         ? Model.formatHostPort(conn.gateway.host, conn.gateway.port, Model.DEFAULT_GATEWAY_PORT) : ""
       root.formUser = conn.user
+      root.formStart = conn.start || ""
       root.formCert = conn.options.cert
       root.formScale = conn.options.scale
       root.formDisplayMode = conn.options.displayMode
@@ -250,6 +253,7 @@ Panel {
       root.formHost = ""
       root.formGateway = ""
       root.formUser = ""
+      root.formStart = blank.start || ""
       root.formCert = blank.options.cert
       root.formScale = blank.options.scale
       root.formDisplayMode = blank.options.displayMode
@@ -310,6 +314,7 @@ Panel {
         return gw.host ? { host: gw.host, port: gw.port !== null ? gw.port : Model.DEFAULT_GATEWAY_PORT } : null
       })(),
       secret: "keyring",
+      start: root.formStart,
       drives: root.drivesFromModel(),
       options: {
         displayMode: root.formDisplayMode,
@@ -730,6 +735,17 @@ Panel {
               onSubmitted: root.saveForm()
             }
 
+            FormField {
+              width: parent.width
+              label: "Start command (optional)"
+              text: root.formStart
+              placeholder: "docker compose -f ~/.config/windows/docker-compose.yml up -d"
+              hint: "Run before connecting; the session waits until RDP answers"
+              errorText: root.formErrors.start || ""
+              onEdited: function(t) { root.formStart = t }
+              onSubmitted: root.saveForm()
+            }
+
             PanelSeparator { foreground: root.foreground }
 
             PanelSectionHeader {
@@ -969,6 +985,7 @@ Panel {
         Text {
           width: parent.width
           text: Model.endpointFor(row.conn)
+            + (row.conn.start ? "  ·  auto-start" : "")
             + (Model.driveSummary(row.conn) ? "  ·  " + Model.driveSummary(row.conn) : "")
           color: root.dim
           font.family: root.fontFamily

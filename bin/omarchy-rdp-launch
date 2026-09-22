@@ -110,6 +110,7 @@ user=$(field user)
 domain=$(field domain)
 cert=$(field options.cert tofu)
 scale=$(field options.scale 100)
+start=$(field start)
 
 [[ -n "$host" ]] || die "connection '$id' has no host"
 [[ -n "$user" ]] || die "connection '$id' has no user"
@@ -156,6 +157,10 @@ if [[ -n "$gw_host" && "$gw_host" != *[[:space:],]* ]] \
   fi
 fi
 args+=("/cert:$cert")
+# Pin the NLA package list to NTLM. /etc/krb5.conf here points default_realm at
+# MIT's public KDC, which makes FreeRDP retry Kerberos instead of falling back
+# to NTLM. Mirrors Model.js buildArgs().
+args+=("/auth-pkg-list:none,ntlm")
 
 # ---------------------------------------------------------------- sizing
 
@@ -288,6 +293,7 @@ if (( dry_run )); then
   printf '%s\n' "${args[@]}" '/p:<redacted>'
   printf '\n# %s /args-from:fd:3   (%d arguments, none of them on the command line)\n' \
     "$XFREERDP" "$(( ${#args[@]} + 1 ))"
+  [[ -n $start ]] && printf '# start: %s\n' "$start"
   exit 0
 fi
 
@@ -512,6 +518,44 @@ fi
 [[ -x "$XFREERDP" ]] || die "xfreerdp3 not found, install the freerdp package"
 
 write_state connecting
+
+# --------------------------------------------------- optional start + wait ----
+#
+# A connection may carry an optional `start` shell command that brings its
+# machine up before the session connects (a dockur/Windows VM, typically). The
+# container's RDP port is forwarded long before Windows answers on it, so a TCP
+# check would pass far too early; the wait is an auth-only probe instead, using
+# the same credentials and /auth-pkg-list as the real session, and it stops once
+# authentication succeeds. Only runs when a start command is present: a
+# connection without one connects exactly as before.
+if [[ -n ${start:-} ]]; then
+  printf 'omarchy-rdp-launch: running start command: %s\n' "$start" >&2
+  bash -lc "$start" >&2
+  start_status=$?
+  if (( start_status != 0 )); then
+    die "Start command failed (exit $start_status)" "$start_status"
+  fi
+
+  wait_timeout=${OMARCHY_RDP_START_TIMEOUT:-180}
+  if [[ ! $wait_timeout =~ ^[0-9]+$ ]] || (( wait_timeout <= 0 )); then
+    wait_timeout=180
+  fi
+  waited=0
+  probe_args=("${args[@]}" "+auth-only" "/log-level:OFF")
+  printf 'omarchy-rdp-launch: waiting for %s to accept RDP...\n' "$host" >&2
+  # -s KILL for the same reason windows-vm-launch uses it: a plain TERM lands in
+  # FreeRDP's own handler while the connect is in flight and that path can
+  # re-raise, leaving a SIGSEGV core. The probe is throwaway, so kill it hard.
+  while ! timeout -s KILL 20 "$XFREERDP" /args-from:fd:3 \
+        3< <(printf '%s\n' "${probe_args[@]}") >/dev/null 2>&1; do
+    (( stopped )) && exit 0
+    sleep 2
+    waited=$((waited + 2))
+    if (( waited >= wait_timeout )); then
+      die "Timed out waiting for RDP on $host" 1
+    fi
+  done
+fi
 
 # ------------------------------------------------------------------- run it
 

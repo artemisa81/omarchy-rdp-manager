@@ -5,6 +5,25 @@
      conflict over this file. The release commit renames this heading to the
      version and bumps manifest.json, so the number is chosen from what
      actually shipped rather than guessed when the branch was opened. -->
+## 0.7.0
+
+### Added
+
+- Optional per-connection **start command**. It runs through `bash -lc` before
+  connecting, and the launcher then waits — with an auth-only FreeRDP probe
+  rather than a TCP check, since a container forwards its RDP port long before
+  the guest answers on it — until the remote accepts RDP. This is what lets a
+  bar entry bring a local VM (for example a dockur/Windows container on
+  `127.0.0.1:3389`) up and connect in one click.
+
+### Changed
+
+- FreeRDP's NLA package list is pinned to NTLM with
+  `/auth-pkg-list:none,ntlm`. On hosts whose `/etc/krb5.conf` still carries the
+  stock `default_realm = ATHENA.MIT.EDU`, FreeRDP otherwise tries Kerberos
+  first and can retry the failing round trip indefinitely instead of falling
+  back to NTLM.
+
 ## 0.6.0
 
 ### Added

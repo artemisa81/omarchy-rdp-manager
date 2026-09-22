@@ -325,6 +325,32 @@ test("normalizeConnection drops unknown keys", function () {
   assert.strictEqual(c.evil, undefined)
 })
 
+// -------------------------------------------------------------- start command
+
+test("normalizeConnection keeps a start command and defaults it to empty", function () {
+  assert.strictEqual(M.normalizeConnection({ id: "a", host: "h", user: "u" }).start, "")
+  assert.strictEqual(
+    M.normalizeConnection({ id: "a", host: "h", user: "u", start: "  vm up  " }).start, "vm up")
+})
+
+test("serializeConfig round-trips a start command", function () {
+  var conn = { id: "a", name: "A", host: "h", user: "u", start: "docker compose up -d" }
+  var again = M.parseConfig(M.serializeConfig([conn])).connections[0]
+  assert.strictEqual(again.start, "docker compose up -d")
+})
+
+test("buildArgs pins the NLA package list to NTLM", function () {
+  var args = M.buildArgs({ id: "a", name: "A", host: "h", user: "u" })
+  assert.ok(args.indexOf("/auth-pkg-list:none,ntlm") !== -1, "missing /auth-pkg-list")
+})
+
+test("a start command never reaches the FreeRDP argument list", function () {
+  var conn = { id: "a", name: "A", host: "h", user: "u", start: "vm up; /p:leak" }
+  M.buildArgs(conn).forEach(function (a) {
+    assert.ok(a.indexOf("vm up") === -1, "start command leaked into argv: " + a)
+  })
+})
+
 // ------------------------------------------------------------- config parsing
 
 test("parseConfig reports bad JSON instead of throwing", function () {
@@ -508,6 +534,7 @@ test("buildArgs reproduces the documented baseline command", function () {
     "/v:10.0.0.5",
     "/u:Administrator",
     "/cert:tofu",
+    "/auth-pkg-list:none,ntlm",
     "+clipboard",
     "/sound",
     // No autoSize was passed, so "auto" lands on the documented fallback.
@@ -622,6 +649,7 @@ test("buildArgs places /gateway: after the identity block, hiding port 443", fun
     // Bare g: — no u:/d:/p: sub-options — is FreeRDP's same-credentials mode.
     "/gateway:g:gw.example.com",
     "/cert:tofu",
+    "/auth-pkg-list:none,ntlm",
     "+clipboard",
     "/sound",
     "/size:1920x1080",

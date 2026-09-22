@@ -325,6 +325,9 @@ function normalizeConnection(conn) {
     domain: trim(c.domain),
     gateway: normalizeGateway(c.gateway),
     secret: trim(c.secret) === "prompt" ? "prompt" : "keyring",
+    // Optional shell command the launcher runs before connecting, e.g. to
+    // start a local VM. Empty means connect directly, exactly as before.
+    start: trim(c.start),
     drives: normalizeDrives(c.drives),
     options: normalizeOptions(c.options)
   }
@@ -481,6 +484,13 @@ function buildArgs(conn, autoSize) {
   if (c.gateway) args.push("/gateway:g:" + formatHostPort(c.gateway.host, c.gateway.port, DEFAULT_GATEWAY_PORT))
 
   args.push("/cert:" + c.options.cert)
+  // Pin the NLA package list to NTLM. The stock /etc/krb5.conf on this machine
+  // sets default_realm = ATHENA.MIT.EDU, so FreeRDP's NLA stage tries Kerberos
+  // first and can retry the failing round trip indefinitely instead of falling
+  // back to NTLM. Only the explicit `none,<pkg>` allow-list form is honoured;
+  // `/auth-pkg-list:!kerberos` is silently ignored. Keep in step with
+  // bin/omarchy-rdp-launch.
+  args.push("/auth-pkg-list:none,ntlm")
   // FreeRDP 3 enables clipboard by default, so the meaningful action is the
   // negative one. Emitting +clipboard as well keeps the intent readable in a
   // dry run and matches what a user would type by hand.
@@ -903,6 +913,7 @@ function blankConnection() {
     domain: "",
     gateway: null,
     secret: "keyring",
+    start: "",
     drives: [],
     options: { displayMode: "fixed", resolution: "auto", clipboard: true, sound: true, microphone: false, cert: "tofu", scale: "100" }
   }
