@@ -149,6 +149,14 @@ cat > "$TMP/connections.json" <<'JSON'
     { "id": "start-cmd", "name": "Start command", "host": "10.0.0.28", "port": 3389,
       "user": "u", "domain": "",
       "start": "docker compose -f /x up -d",
+      "drives": [], "options": {} },
+    { "id": "vm-up", "name": "VM up", "host": "10.0.0.29", "port": 3389,
+      "user": "u", "domain": "",
+      "status": "true", "stop": "true",
+      "drives": [], "options": {} },
+    { "id": "vm-down", "name": "VM down", "host": "10.0.0.30", "port": 3389,
+      "user": "u", "domain": "",
+      "status": "false",
       "drives": [], "options": {} }
   ]
 }
@@ -203,6 +211,22 @@ if grep -qx -- '/auth-pkg-list:none,ntlm' <<<"$args"; then ok; else bad "launche
 raw=$(bin/omarchy-rdp-launch start-cmd --dry-run)
 if grep -qx -- '# start: docker compose -f /x up -d' <<<"$raw"; then ok; else bad "dry run must show the start command"; fi
 if grep -q '^docker compose' <<<"$(launcher_args start-cmd)"; then bad "the start command must not be a FreeRDP argument"; else ok; fi
+
+# omarchy-rdp-vm: the per-machine status probe and the map the indicator reads.
+if bin/omarchy-rdp-vm status vm-up; then ok; else bad "status of an up machine must exit 0"; fi
+if bin/omarchy-rdp-vm status vm-down >/dev/null 2>&1; then bad "status of a down machine must not exit 0"; else ok; fi
+vm_list=$(bin/omarchy-rdp-vm list)
+if [[ "$(jq -r '.vms["vm-up"]' <<<"$vm_list")" == "true" \
+   && "$(jq -r '.vms["vm-down"]' <<<"$vm_list")" == "false" ]]; then
+  ok
+else
+  bad "omarchy-rdp-vm list must report running state: $vm_list"
+fi
+# A machine with no status command is not in the map, so its dot is hidden.
+if [[ "$(jq -r '.vms["baseline"] // "absent"' <<<"$vm_list")" == "absent" ]]; then ok; else bad "unconfigured ids must be absent from the list"; fi
+# stop runs the stop command; a connection without one is refused.
+if bin/omarchy-rdp-vm stop vm-up; then ok; else bad "stop must run the stop command"; fi
+if bin/omarchy-rdp-vm stop vm-down >/dev/null 2>&1; then bad "stop without a stop command must fail"; else ok; fi
 
 # wm-class drives status detection; a missing one silently breaks the icon.
 for id in baseline negatives multidrive noname fixed-auto scaled-explicit dynamic-explicit bad-resolution unicode-resolution hidpi bad-scale gateway gateway-port gateway-invalid gateway-bad-port gateway-evil-port gateway-colon-host gateway-bool-port gateway-exp-port gateway-scalar no-sound mic mic-junk sound-junk; do

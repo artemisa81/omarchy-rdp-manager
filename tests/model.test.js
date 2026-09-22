@@ -351,6 +351,27 @@ test("a start command never reaches the FreeRDP argument list", function () {
   })
 })
 
+test("normalizeConnection keeps stop and status commands", function () {
+  var c = M.normalizeConnection({ id: "a", host: "h", user: "u", stop: " down ", status: " up " })
+  assert.strictEqual(c.stop, "down")
+  assert.strictEqual(c.status, "up")
+})
+
+test("serializeConfig round-trips stop and status", function () {
+  var conn = { id: "a", name: "A", host: "h", user: "u", stop: "vm down", status: "vm up" }
+  var again = M.parseConfig(M.serializeConfig([conn])).connections[0]
+  assert.strictEqual(again.stop, "vm down")
+  assert.strictEqual(again.status, "vm up")
+})
+
+test("parseVmStatus maps ids to booleans and never throws", function () {
+  assert.deepStrictEqual(M.parseVmStatus('{"vms":{"a":true,"b":false}}'), { a: true, b: false })
+  assert.deepStrictEqual(M.parseVmStatus(""), {})
+  assert.deepStrictEqual(M.parseVmStatus("not json"), {})
+  assert.deepStrictEqual(M.parseVmStatus('{"vms":[]}'), {})
+  assert.deepStrictEqual(M.parseVmStatus('{"vms":{"a":1}}'), { a: false })
+})
+
 // ------------------------------------------------------------- config parsing
 
 test("parseConfig reports bad JSON instead of throwing", function () {

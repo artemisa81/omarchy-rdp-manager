@@ -36,6 +36,7 @@ Item {
   readonly property string disconnectScript: sourceDir + "/bin/omarchy-rdp-disconnect"
   readonly property string focusScript: sourceDir + "/bin/omarchy-rdp-focus"
   readonly property string secretScript: sourceDir + "/bin/omarchy-rdp-secret"
+  readonly property string vmScript: sourceDir + "/bin/omarchy-rdp-vm"
 
   readonly property string configDir: home + "/.config/omarchy-rdp"
   readonly property string configPath: configDir + "/connections.json"
@@ -44,6 +45,9 @@ Item {
 
   property var connections: []
   property var sessions: []
+  // id -> true/false, from each connection's `status` command. A missing key
+  // means "nothing known": no status command, or the helper has not answered.
+  property var vmRunning: ({})
   readonly property var sessionsById: Model.sessionMap(sessions)
   readonly property var summary: Model.summarize(sessions)
 
@@ -68,6 +72,8 @@ Item {
   function connectionFor(id) { return Model.findConnection(connections, id) }
   function sessionFor(id) { return sessionsById[String(id)] || null }
   function isLive(id) { return Model.isLive(sessionFor(id)) }
+  function vmKnown(id) { return Object.prototype.hasOwnProperty.call(service.vmRunning, String(id)) }
+  function vmIsRunning(id) { return service.vmRunning[String(id)] === true }
 
   // ------------------------------------------------------------- config file
 
@@ -293,6 +299,17 @@ Item {
     schedulePoll(500)
   }
 
+  // Tear down the machine behind a connection, via its own `stop` command.
+  // Detached for the same reason as connect(): `docker compose down` can take a
+  // while and must outlive a shell reload. The poll is brought forward so the
+  // indicator turns red as soon as the teardown lands.
+  function stopConnection(id) {
+    var conn = connectionFor(id)
+    if (!conn || !conn.stop) return
+    Quickshell.execDetached([service.vmScript, "stop", String(id)])
+    schedulePoll(1500)
+  }
+
   // Delegated to a helper because focusing correctly is no longer a one-liner:
   // Hyprland 0.56 moved `hyprctl dispatch` to a Lua interface, so the obvious
   // `dispatch focuswindow class:...` is a Lua syntax error that fails silently,
@@ -430,6 +447,8 @@ Item {
     }
 
     onExited: function(exitCode) {
+      // Refresh the per-machine indicators on the same cadence as the sessions.
+      service.refreshVms()
       if (exitCode !== 0) {
         service.errorText = "Status helper failed (exit " + exitCode + ")"
         pollTimer.interval = 10000
@@ -443,6 +462,25 @@ Item {
       pollTimer.interval = Model.pollInterval(service.summary)
       pollTimer.restart()
     }
+  }
+
+  // One process runs every connection's `status` command and reports the lot as
+  // JSON, so adding a VM costs a command here rather than a timer per row.
+  Process {
+    id: vmStatusProc
+    command: [service.vmScript, "list"]
+    stdout: StdioCollector { id: vmOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      // A failed helper leaves the previous map in place rather than blanking
+      // every indicator; parseVmStatus never throws.
+      if (exitCode !== 0) return
+      service.vmRunning = Model.parseVmStatus(vmOut.text)
+    }
+  }
+
+  function refreshVms() {
+    if (vmStatusProc.running) return
+    vmStatusProc.running = true
   }
 
   function refresh() {
@@ -493,6 +531,12 @@ Item {
       return "ok"
     }
 
+    function stop(id: string): string {
+      if (!service.connectionFor(id)) return "unknown connection: " + id
+      service.stopConnection(id)
+      return "ok"
+    }
+
     function list(): string {
       var out = []
       for (var i = 0; i < service.connections.length; i++) {
@@ -517,5 +561,6 @@ Item {
     // to exist.
     mkdirProc.running = true
     service.refresh()
+    service.refreshVms()
   }
 }

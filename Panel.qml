@@ -37,6 +37,9 @@ Panel {
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color accent: Color.accent
   readonly property color dim: Qt.darker(foreground, 1.55)
+  // The theme carries no green, so the "machine is up" light uses its own. It
+  // reads on both light and dark backgrounds; "down" reuses the urgent colour.
+  readonly property color vmUp: "#4caf50"
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   readonly property string glyphIdle: "\u{F08B9}"      // nf-md-remote-desktop
@@ -46,6 +49,7 @@ Panel {
   readonly property string glyphEdit: "\u{F03EB}"      // nf-md-pencil
   readonly property string glyphDelete: "\u{F01B4}"    // nf-md-delete
   readonly property string glyphTest: "\u{F0450}"      // nf-md-refresh
+  readonly property string glyphStop: "\u{F0425}"      // nf-md-power
   readonly property string glyphAdd: "\u{F0415}"       // nf-md-plus
 
   function toneColor(tone) {
@@ -77,6 +81,7 @@ Panel {
   property int selectedIndex: -1
   property bool cursorActive: false
   property string confirmDeleteId: ""
+  property string confirmStopId: ""
 
   // Form state. Held here rather than in the service because two monitors can
   // have the form open on different connections at the same time.
@@ -89,8 +94,11 @@ Panel {
   property string formGateway: ""
   property string formUser: ""
   property string formPassword: ""
-  // Optional shell command run before connecting, e.g. to start a local VM.
+  // Optional shell commands: start before connecting, stop to tear down,
+  // status to report whether the machine is up.
   property string formStart: ""
+  property string formStop: ""
+  property string formStatus: ""
   property string formCert: "tofu"
   // One of Model.SCALE_VALUES — the only three FreeRDP's /scale: accepts.
   property string formScale: "100"
@@ -236,6 +244,8 @@ Panel {
         ? Model.formatHostPort(conn.gateway.host, conn.gateway.port, Model.DEFAULT_GATEWAY_PORT) : ""
       root.formUser = conn.user
       root.formStart = conn.start || ""
+      root.formStop = conn.stop || ""
+      root.formStatus = conn.status || ""
       root.formCert = conn.options.cert
       root.formScale = conn.options.scale
       root.formDisplayMode = conn.options.displayMode
@@ -254,6 +264,8 @@ Panel {
       root.formGateway = ""
       root.formUser = ""
       root.formStart = blank.start || ""
+      root.formStop = blank.stop || ""
+      root.formStatus = blank.status || ""
       root.formCert = blank.options.cert
       root.formScale = blank.options.scale
       root.formDisplayMode = blank.options.displayMode
@@ -315,6 +327,8 @@ Panel {
       })(),
       secret: "keyring",
       start: root.formStart,
+      stop: root.formStop,
+      status: root.formStatus,
       drives: root.drivesFromModel(),
       options: {
         displayMode: root.formDisplayMode,
@@ -349,6 +363,32 @@ Panel {
     if (svc && root.confirmDeleteId) svc.removeConnection(root.confirmDeleteId)
     root.confirmDeleteId = ""
     root.ensureCursor()
+  }
+
+  function stopConfirmed() {
+    if (svc && root.confirmStopId) svc.stopConnection(root.confirmStopId)
+    root.confirmStopId = ""
+    root.ensureCursor()
+  }
+
+  // Which confirmation is up, if any. Generalised from the single delete dialog
+  // so both destructive actions share one keyboard path.
+  function activeConfirm() {
+    return root.confirmDeleteId !== "" ? deleteConfirm : stopConfirm
+  }
+
+  function closeConfirm() {
+    root.confirmDeleteId = ""
+    root.confirmStopId = ""
+  }
+
+  // Enter commits whatever the dialog has highlighted; index 0 is always the
+  // non-destructive button.
+  function acceptConfirm() {
+    var dialog = root.activeConfirm()
+    if (dialog.selectedIndex === 0) { root.closeConfirm(); return }
+    if (root.confirmDeleteId !== "") root.deleteConfirmed()
+    else root.stopConfirmed()
   }
 
   // Reset transient view state whenever the popup closes, so reopening never
@@ -452,36 +492,32 @@ Panel {
       // While the confirm dialog is up it owns every key: left/right pick a
       // button, Enter commits the highlighted one, Esc backs out. Nothing may
       // fall through to the list underneath.
-      readonly property bool confirming: root.confirmDeleteId !== ""
+      readonly property bool confirming: root.confirmDeleteId !== "" || root.confirmStopId !== ""
 
       onMoveRequested: function(dx, dy) {
         if (confirming) {
-          if (dx !== 0) deleteConfirm.selectedIndex = deleteConfirm.selectedIndex === 0 ? 1 : 0
+          var dialog = root.activeConfirm()
+          if (dx !== 0) dialog.selectedIndex = dialog.selectedIndex === 0 ? 1 : 0
           return
         }
         if (!root.cursorActive) { root.cursorActive = true; return }
         root.moveCursor(dx, dy)
       }
       onActivateRequested: {
-        if (confirming) {
-          if (deleteConfirm.selectedIndex === 0) root.confirmDeleteId = ""
-          else root.deleteConfirmed()
-          return
-        }
+        if (confirming) { root.acceptConfirm(); return }
         if (root.cursorActive) root.activateCursor()
       }
       onReturnRequested: {
-        if (!confirming) return
-        if (deleteConfirm.selectedIndex === 0) root.confirmDeleteId = ""
-        else root.deleteConfirmed()
+        if (confirming) root.acceptConfirm()
       }
       onCloseRequested: {
-        if (confirming) { root.confirmDeleteId = ""; return }
+        if (confirming) { root.closeConfirm(); return }
         root.close()
       }
       onTabRequested: function(direction) {
         if (confirming) {
-          deleteConfirm.selectedIndex = deleteConfirm.selectedIndex === 0 ? 1 : 0
+          var dialog = root.activeConfirm()
+          dialog.selectedIndex = dialog.selectedIndex === 0 ? 1 : 0
           return
         }
         root.switchPanel(direction)
@@ -663,6 +699,25 @@ Panel {
         onConfirmed: root.deleteConfirmed()
         onCanceled: root.confirmDeleteId = ""
       }
+
+      // Shutting a machine down can discard unsaved work inside it, so it also
+      // confirms — but opens on Cancel, unlike Delete's pre-armed confirm.
+      ConfirmDialog {
+        id: stopConfirm
+        anchors.fill: parent
+        z: 10
+        opened: root.confirmStopId !== ""
+        onOpenedChanged: if (opened) selectedIndex = 0
+        message: root.confirmStopId === "" ? "" :
+          "Shut down \"" + (root.svc && root.svc.connectionFor(root.confirmStopId)
+            ? root.svc.connectionFor(root.confirmStopId).name : root.confirmStopId)
+          + "\"?"
+        confirmText: "Shut down"
+        cancelText: "Keep running"
+        foreground: root.foreground
+        onConfirmed: root.stopConfirmed()
+        onCanceled: root.confirmStopId = ""
+      }
     }
   }
 
@@ -743,6 +798,28 @@ Panel {
               hint: "Run before connecting; the session waits until RDP answers"
               errorText: root.formErrors.start || ""
               onEdited: function(t) { root.formStart = t }
+              onSubmitted: root.saveForm()
+            }
+
+            FormField {
+              width: parent.width
+              label: "Stop command (optional)"
+              text: root.formStop
+              placeholder: "docker compose -f ~/.config/windows/docker-compose.yml down"
+              hint: "Run by the panel's Shut down button"
+              errorText: root.formErrors.stop || ""
+              onEdited: function(t) { root.formStop = t }
+              onSubmitted: root.saveForm()
+            }
+
+            FormField {
+              width: parent.width
+              label: "Status command (optional)"
+              text: root.formStatus
+              placeholder: "docker inspect -f '{{.State.Running}}' omarchy-windows | grep -q true"
+              hint: "Exit 0 when the machine is up; drives the row's indicator"
+              errorText: root.formErrors.status || ""
+              onEdited: function(t) { root.formStatus = t }
               onSubmitted: root.saveForm()
             }
 
@@ -965,9 +1042,24 @@ Panel {
       anchors.rightMargin: Style.spacing.rowPaddingX
       implicitHeight: textCol.implicitHeight
 
+      // Traffic light for the machine behind the connection: green up, red down,
+      // dimmed while the first status answer is still on its way.
+      Rectangle {
+        id: vmDot
+        visible: !!row.conn.status
+        width: Style.space(8)
+        height: width
+        radius: width / 2
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        color: root.svc && root.svc.vmIsRunning(row.conn.id) ? root.vmUp : root.urgent
+        opacity: root.svc && root.svc.vmKnown(row.conn.id) ? 1.0 : 0.35
+      }
+
       Column {
         id: textCol
-        anchors.left: parent.left
+        anchors.left: vmDot.visible ? vmDot.right : parent.left
+        anchors.leftMargin: vmDot.visible ? Style.space(7) : 0
         anchors.right: actions.left
         anchors.rightMargin: Style.space(8)
         anchors.verticalCenter: parent.verticalCenter
@@ -1050,6 +1142,18 @@ Panel {
           fontFamily: root.fontFamily
           enabled: !!root.svc && root.svc.testingId === ""
           onClicked: if (root.svc) root.svc.testConnection(row.conn.id)
+        }
+
+        PanelActionButton {
+          // Only offered for a machine that is up (or whose state is not known,
+          // so a connection without a status command can still be shut down).
+          visible: !!row.conn.stop && !row.live
+            && (!root.svc || !root.svc.vmKnown(row.conn.id) || root.svc.vmIsRunning(row.conn.id))
+          iconText: root.glyphStop
+          tooltipText: "Shut down the machine behind this connection"
+          foreground: root.urgent
+          fontFamily: root.fontFamily
+          onClicked: root.confirmStopId = row.conn.id
         }
 
         PanelActionButton {

@@ -325,9 +325,13 @@ function normalizeConnection(conn) {
     domain: trim(c.domain),
     gateway: normalizeGateway(c.gateway),
     secret: trim(c.secret) === "prompt" ? "prompt" : "keyring",
-    // Optional shell command the launcher runs before connecting, e.g. to
-    // start a local VM. Empty means connect directly, exactly as before.
+    // Optional shell commands. `start` runs before connecting (the session then
+    // waits for RDP); `stop` tears the machine down; `status` reports whether it
+    // is running, exit 0 meaning up, and drives the panel's indicator. Empty
+    // means the feature is off for this connection.
     start: trim(c.start),
+    stop: trim(c.stop),
+    status: trim(c.status),
     drives: normalizeDrives(c.drives),
     options: normalizeOptions(c.options)
   }
@@ -719,6 +723,27 @@ function parseStatus(raw) {
   return { sessions: out, error: trim(parsed ? parsed.error : "") }
 }
 
+// Parse the `omarchy-rdp-vm list` document into an id -> boolean map. Never
+// throws: a helper that could not run degrades to "nothing known", which hides
+// the indicators rather than colouring them from a stale answer.
+function parseVmStatus(raw) {
+  var text = trim(raw)
+  if (!text) return {}
+  var parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch (e) {
+    return {}
+  }
+  var vms = parsed && typeof parsed === "object" ? parsed.vms : null
+  if (!vms || typeof vms !== "object" || Array.isArray(vms)) return {}
+  var out = {}
+  for (var key in vms) {
+    if (Object.prototype.hasOwnProperty.call(vms, key)) out[key] = vms[key] === true
+  }
+  return out
+}
+
 // Index sessions by connection id so a row can look its own state up in O(1).
 function sessionMap(sessions) {
   var list = asList(sessions)
@@ -914,6 +939,8 @@ function blankConnection() {
     gateway: null,
     secret: "keyring",
     start: "",
+    stop: "",
+    status: "",
     drives: [],
     options: { displayMode: "fixed", resolution: "auto", clipboard: true, sound: true, microphone: false, cert: "tofu", scale: "100" }
   }
@@ -927,7 +954,7 @@ if (typeof module !== "undefined") module.exports = {
   wmClassFor, buildArgs, previewArgs, previewCommand,
   describeExit, describeEnd, isFailureExit, isSessionEndCode, isDroppedSession,
   EXIT_MESSAGES, NORMAL_END_CODES,
-  normalizeSession, parseStatus, sessionMap, isLive, summarize, pollInterval,
+  normalizeSession, parseStatus, parseVmStatus, sessionMap, isLive, summarize, pollInterval,
   formatDuration, endpointFor, formatHostPort, driveSummary, rowStatus, tooltipFor, heroMeta,
   upsertConnection, removeConnection, findConnection, blankConnection,
   autoResolution, parseResolution, normalizeResolution, normalizeDisplayMode, resolveResolution,

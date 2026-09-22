@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Inspect and control the machine behind a connection.
+#
+#   omarchy-rdp-vm status <connection-id>   exit 0 if running, 1 if not, 2 if unconfigured
+#   omarchy-rdp-vm stop   <connection-id>   run the connection's stop command
+#   omarchy-rdp-vm list                     JSON map of id -> running (configured ids only)
+#
+# Both are plain shell commands stored per connection in connections.json:
+# `status` is the "is the machine up?" probe (exit 0 means running) and `stop`
+# tears it down. A connection with no `status` command has no indicator; one with
+# no `stop` command cannot be shut down from the panel.
+#
+# This runs the user's own commands from their own config, exactly as the
+# launcher already runs the `start` command, so the trust boundary is unchanged.
+set -uo pipefail
+
+JQ=/usr/bin/jq
+CONFIG_DIR=${OMARCHY_RDP_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-rdp}
+CONFIG_FILE="$CONFIG_DIR/connections.json"
+
+die() { printf 'omarchy-rdp-vm: %s\n' "$1" >&2; exit "${2:-1}"; }
+
+[[ -x $JQ ]] || die "jq not found at $JQ"
+
+action=${1:-}
+
+read_conn() {
+  local id=$1
+  [[ -n $id ]] || die "usage: omarchy-rdp-vm $action <connection-id>" 64
+  [[ $id =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "invalid connection id: $id" 64
+  [[ -r $CONFIG_FILE ]] || die "no config at $CONFIG_FILE"
+  "$JQ" -e --arg id "$id" '.connections[] | select(.id == $id)' "$CONFIG_FILE" 2>/dev/null \
+    || die "no connection with id '$id' in $CONFIG_FILE"
+}
+
+case "$action" in
+  status)
+    conn=$(read_conn "${2:-}")
+    cmd=$(printf '%s' "$conn" | "$JQ" -r '.status // ""')
+    [[ -n $cmd ]] || exit 2
+    bash -lc "$cmd" >/dev/null 2>&1
+    exit $?
+    ;;
+
+  stop)
+    conn=$(read_conn "${2:-}")
+    cmd=$(printf '%s' "$conn" | "$JQ" -r '.stop // ""')
+    [[ -n $cmd ]] || die "no stop command for '${2:-}'" 3
+    bash -lc "$cmd"
+    exit $?
+    ;;
+
+  list)
+    # Nothing configured yet is not an error: report no known VMs so the panel
+    # hides every indicator rather than colouring them wrong.
+    [[ -r $CONFIG_FILE ]] || { printf '{"vms":{}}\n'; exit 0; }
+    {
+      while IFS=$'\t' read -r cid cmd; do
+        [[ -n $cid ]] || continue
+        if bash -lc "$cmd" >/dev/null 2>&1; then running=true; else running=false; fi
+        printf '%s\t%s\n' "$cid" "$running"
+      done < <("$JQ" -r '.connections[] | select((.status // "") != "") | [.id, .status] | @tsv' "$CONFIG_FILE" 2>/dev/null)
+    } | "$JQ" -Rn '{vms: ([inputs | split("\t") | select(length == 2) | {(.[0]): (.[1] == "true")}] | add // {})}'
+    ;;
+
+  -h | --help | help)
+    sed -n '3,10p' "$0" | sed 's/^# \?//'
+    ;;
+
+  *)
+    die "usage: omarchy-rdp-vm {status|stop|list} <connection-id>" 64
+    ;;
+esac

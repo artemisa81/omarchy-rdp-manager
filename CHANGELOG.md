@@ -5,6 +5,21 @@
      conflict over this file. The release commit renames this heading to the
      version and bumps manifest.json, so the number is chosen from what
      actually shipped rather than guessed when the branch was opened. -->
+## 0.8.0
+
+### Added
+
+- A per-connection **status command** and a green/red indicator on each row, so
+  a machine that stays running in the background can be seen at a glance. The
+  command exits 0 when the machine is up; the dot is dimmed until the first
+  answer arrives, and hidden entirely for connections without one.
+- A per-connection **stop command** and a Shut down button, behind a
+  confirmation that opens on Cancel. This tears a machine down without deleting
+  the connection, for the "leave it running, connect in and out" workflow.
+- `bin/omarchy-rdp-vm` (`status`/`stop`/`list`) backs both. One `list` call
+  answers for every connection, so the indicator costs one process per poll
+  rather than one per row.
+
 ## 0.7.0
 
 ### Added
