@@ -22,11 +22,8 @@ This plugin keeps the convenience and drops the exposure.
 
 ## Install
 
-FreeRDP is not part of a stock Omarchy install, so install it first:
-
-```bash
-sudo pacman -S freerdp
-```
+FreeRDP is not part of a stock Omarchy install, so install the `freerdp` package
+from the Arch repositories first.
 
 Then add the plugin:
 
@@ -137,6 +134,7 @@ contains a password** — only a `"secret": "keyring"` marker.
     {
       "id": "windows-build-server",
       "name": "Windows build server",
+      "group": "Lab",
       "host": "10.0.0.5",
       "port": 3389,
       "user": "Administrator",
@@ -165,6 +163,11 @@ Edits are picked up live — no reload needed. Notes:
 - `id` is generated from the name and is then **immutable**: it is the keyring
   lookup key and the `/wm-class` suffix used to detect the session's window.
   Changing it by hand orphans the stored password.
+- `group` is the heading the list files the connection under, or `""` for
+  none. It is a label, not an id: `Work` and `work` are two groups, sorted
+  next to each other. Ungrouped connections come first, then each group in
+  alphabetical order. The form offers every group in use plus "new group",
+  so a typo cannot quietly split one group in two.
 - `domain` is honoured by the launcher but has no form field yet.
 - `port` has no dedicated form field either, but the Host field shows and
   accepts `host:port` as one string — typing it in splits `host`/`port` apart
@@ -239,6 +242,19 @@ omarchy bar set io.github.cahva.rdp-manager hideWhenIdle true
 
 Click the bar icon, or bind `omarchy-shell shell toggle io.github.cahva.rdp-manager`.
 
+The same list also opens as a real window: middle-click the bar icon, press `w`
+in the panel, or click the window button in the panel's header. It is tiled by
+Hyprland like any other app, can be resized, and stays open while you work, which
+the panel cannot. When it is wide enough, the connections within each group sit
+side by side in as many columns as fit; the groups themselves always stack, and
+`h` / `l` step sideways while `j` / `k` step a row. For a keybind, `window` shows it, brings it forward if it is
+on another workspace, or hides it when it already has focus:
+
+```lua
+-- ~/.config/hypr/bindings.lua
+o.bind("SUPER + R", "RDP Manager", "omarchy-shell io.github.cahva.rdp-manager window")
+```
+
 | State | Bar icon |
 |---|---|
 | Idle | Plain glyph (hidden entirely with `hideWhenIdle`) |
@@ -246,7 +262,7 @@ Click the bar icon, or bind `omarchy-shell shell toggle io.github.cahva.rdp-mana
 | Connected | Highlighted, with a count when more than one session is live |
 | Last attempt failed | Tinted urgent; the reason is in the tooltip |
 
-In the panel:
+In the panel or the window:
 
 | Key | Action |
 |---|---|
@@ -256,7 +272,18 @@ In the panel:
 | `e` / `d` | Edit / delete |
 | `t` | Test the connection without opening a window |
 | `n` | New connection |
-| `Esc` | Close the panel, or back out of the form |
+| `Enter`, `h` / `l` | On a group heading: fold or unfold it |
+| `w` | Open the window (panel only) |
+| `Esc` | Close the panel or window, or back out of the form |
+
+Connections with a `group` sit under a heading of their own, which folds on a
+click or on `Enter`, `h` and `l`, and shows how many it hides while folded. Fold
+state belongs to the panel or window it was folded in and is not written
+anywhere; a shell restart unfolds everything.
+
+In the form, Tab walks the controls. On a dropdown, typing a letter picks the
+next option whose label starts with it, and Esc backs out of the form from
+any control, not only a text field.
 
 `x` also deletes, because Omarchy's shared panel key handler reserves it for that
 across every panel and consumes it before this plugin sees it. Disconnect is `s`
@@ -289,6 +316,9 @@ omarchy-shell io.github.cahva.rdp-manager list
 omarchy-shell io.github.cahva.rdp-manager status
 omarchy-shell io.github.cahva.rdp-manager connect my-server
 omarchy-shell io.github.cahva.rdp-manager disconnect my-server
+omarchy-shell io.github.cahva.rdp-manager window      # show, focus or hide the window
+omarchy-shell io.github.cahva.rdp-manager show        # the window, definitely up
+omarchy-shell io.github.cahva.rdp-manager hide        # the window, definitely gone
 ```
 
 ## Hyprland window rules
@@ -380,11 +410,10 @@ locked keyring surfaces as an error rather than hanging the bar. Unlock it and r
 
 ## Development
 
-```bash
-git clone https://github.com/cahva/omarchy-rdp-manager.git
-cd omarchy-rdp-manager
+From a clone of this repository:
 
-./dev-install.sh                 # rsync into ~/.config/omarchy/plugins/ + reload
+```bash
+./dev-sync.sh                    # rsync into ~/.config/omarchy/plugins/ + reload
 omarchy plugin enable io.github.cahva.rdp-manager right
 omarchy restart shell            # required after any .qml change, see below
 
@@ -401,12 +430,15 @@ the process, so even disabling and re-enabling the plugin re-instantiates the ol
 one. Only `omarchy restart shell` picks up a `.qml` edit.
 
 `bin/` and `Model.js` are different. The launcher is a script executed afresh on
-every connect, so a change there is live as soon as `dev-install.sh` has run.
+every connect, so a change there is live as soon as `dev-sync.sh` has run.
 
-`Model.js` holds every pure function and is shared by `Service.qml`, `Panel.qml` and
-the tests. `Service.qml` is loaded **once per shell session** and owns all state, the
-poll timer and every file write. `Panel.qml` is built **once per monitor** and is a
-view — putting state there gives a two-monitor user two of it.
+`Model.js` holds every pure function and is shared by `Service.qml`, the QML views
+and the tests. `Service.qml` is loaded **once per shell session** and owns all
+state, the poll timer, every file write, and the window. `Panel.qml` is built
+**once per monitor** and is a view — putting state there gives a two-monitor user
+two of it. What the panel shows lives in `ConnectionsView.qml`, which
+`ConnectionsWindow.qml` hosts too, so a change to the list or the form lands in
+both surfaces at once.
 
 Two things worth knowing if you hack on this:
 

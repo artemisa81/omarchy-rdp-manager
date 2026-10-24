@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import "Model.js" as Model
 
@@ -68,6 +69,66 @@ Item {
   signal connectionRemoved(string id)
   signal secretProbed(string id, bool present)
   signal actionFailed(string id, string message)
+
+  // Mirrored from the bar widget's setting by Panel.qml. The window and the IPC
+  // surface connect through here and have no widget entry to read it from.
+  property bool notifyOnDisconnect: true
+
+  // ------------------------------------------------------------------ window
+
+  // The popup's content in a real window (ConnectionsWindow.qml). It lives
+  // here rather than in Panel.qml because the shell builds a panel per monitor
+  // and there should only ever be one window. Created on first use and kept:
+  // hide and show flip `visible`, and Quickshell maps it again each time.
+  //
+  // A close from outside — the title bar button, killactive — is different.
+  // The window is gone but `visible` still says true, so a later show would
+  // find nothing to do. Quickshell reports that as `closed`; the item is
+  // dropped there and the next show starts from a fresh one.
+  readonly property bool windowVisible: windowLoader.item ? windowLoader.item.visible === true : false
+  readonly property string windowTitle: "RDP Manager"
+
+  // Qt knows which of its windows has keyboard focus, so there is no need to
+  // match Hyprland's active toplevel by PID and title.
+  readonly property bool windowFocused: windowVisible && windowLoader.item.focused === true
+
+  Loader {
+    id: windowLoader
+    active: false
+    sourceComponent: ConnectionsWindow {
+      svc: service
+      // Deferred: destroying the emitter from inside its own signal is asking
+      // for trouble.
+      onClosed: Qt.callLater(function() { windowLoader.active = false })
+    }
+  }
+
+  function showWindow() {
+    if (!windowLoader.active) windowLoader.active = true
+    if (!windowLoader.item.visible) {
+      // A new toplevel takes focus when it maps; nothing more to do.
+      windowLoader.item.visible = true
+      return
+    }
+    // Already up, possibly on another workspace or under something: bring it
+    // forward instead of leaving the user to hunt for it. Hyprland 0.56 takes
+    // Lua here; the classic focuswindow is a syntax error to it.
+    Hyprland.dispatch("hl.dsp.focus({ window = \"title:^" + windowTitle + "$\" })")
+  }
+
+  function hideWindow() {
+    if (windowLoader.item) windowLoader.item.visible = false
+  }
+
+  // Bound to a key, this does what a user pressing the key wants: bring the
+  // window up, bring it forward, or put it away — in that order — rather than a
+  // plain toggle, which hides a window that was merely on another workspace.
+  function toggleWindow() {
+    if (!windowVisible) { showWindow(); return "shown" }
+    if (!windowFocused) { showWindow(); return "focused" }
+    hideWindow()
+    return "hidden"
+  }
 
   function connectionFor(id) { return Model.findConnection(connections, id) }
   function sessionFor(id) { return sessionsById[String(id)] || null }
@@ -338,7 +399,7 @@ Item {
 
   function mergePending(parsed) {
     var list = Model.asList(parsed)
-    var byId = {}
+    var byId = Object.create(null)
     for (var i = 0; i < list.length; i++) byId[String(list[i].id)] = true
 
     var now = Date.now()
@@ -553,6 +614,12 @@ Item {
       service.refresh()
       return "ok"
     }
+
+    // `window` is the one to bind to a key; `show` and `hide` are for scripts
+    // that need a definite outcome.
+    function window(): string { return service.toggleWindow() }
+    function show(): string { service.showWindow(); return "ok" }
+    function hide(): string { service.hideWindow(); return "ok" }
   }
 
   Component.onCompleted: {
